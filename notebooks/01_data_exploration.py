@@ -1,0 +1,168 @@
+# notebooks/01_data_exploration.ipynb
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# BioDynamICS: Data Exploration\n",
+    "\n",
+    "This notebook performs initial data exploration on the MIMIC-III demo dataset to understand its structure and characteristics."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import os\n",
+    "import sys\n",
+    "import pandas as pd\n",
+    "import numpy as np\n",
+    "import matplotlib.pyplot as plt\n",
+    "import seaborn as sns\n",
+    "\n",
+    "# Add the parent directory to path so we can import our modules\n",
+    "module_path = os.path.abspath(os.path.join('..'))\n",
+    "if module_path not in sys.path:\n",
+    "    sys.path.append(module_path)\n",
+    "\n",
+    "# Import our data integration module\n",
+    "from src.data_integration import MimicPatientIntegrator"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Configure visualization settings\n",
+    "plt.style.use('seaborn-v0_8-whitegrid')\n",
+    "sns.set(style=\"whitegrid\")\n",
+    "plt.rcParams['figure.figsize'] = [12, 6]\n",
+    "plt.rcParams['font.size'] = 12"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Initialize data integrator\n",
+    "data_path = os.path.join('..', 'mimic-iii-clinical-database-demo-1.4')\n",
+    "mimic = MimicPatientIntegrator(data_path)\n",
+    "\n",
+    "# Load core tables\n",
+    "patient_stays = mimic.load_core_tables()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Exploring Patient Demographics"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Get basic demographics\n",
+    "patients = mimic.tables['PATIENTS']\n",
+    "\n",
+    "# Show the first few rows\n",
+    "patients.head()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Gender distribution\n",
+    "gender_counts = patients['gender'].value_counts()\n",
+    "plt.figure(figsize=(8, 5))\n",
+    "sns.barplot(x=gender_counts.index, y=gender_counts.values)\n",
+    "plt.title('Gender Distribution')\n",
+    "plt.ylabel('Count')\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Create a single patient timeline as an example\n",
+    "# Choose the first patient ID\n",
+    "sample_patient_id = patients['subject_id'].iloc[0]\n",
+    "patient_timeline = mimic.create_patient_timeline(sample_patient_id)\n",
+    "\n",
+    "# Print patient info\n",
+    "print(\"Patient Information:\")\n",
+    "for key, value in patient_timeline['info'].items():\n",
+    "    print(f\"{key}: {value}\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Examine timeline events\n",
+    "timeline = patient_timeline['timeline']\n",
+    "if not timeline.empty:\n",
+    "    # Count event types\n",
+    "    event_counts = timeline['event_type'].value_counts()\n",
+    "    print(\"Event type distribution:\")\n",
+    "    print(event_counts)\n",
+    "    \n",
+    "    # Plot event distribution over time\n",
+    "    plt.figure(figsize=(14, 6))\n",
+    "    \n",
+    "    # Get the event counts per day\n",
+    "    timeline['date'] = timeline['measurement_time'].dt.date\n",
+    "    daily_counts = timeline.groupby(['date', 'event_type']).size().unstack().fillna(0)\n",
+    "    \n",
+    "    daily_counts.plot(kind='bar', stacked=True)\n",
+    "    plt.title(f'Daily Events for Patient {sample_patient_id}')\n",
+    "    plt.ylabel('Number of Events')\n",
+    "    plt.xlabel('Date')\n",
+    "    plt.xticks(rotation=45)\n",
+    "    plt.tight_layout()\n",
+    "    plt.show()\n",
+    "else:\n",
+    "    print(\"No timeline events found for this patient\")"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.8.5"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
