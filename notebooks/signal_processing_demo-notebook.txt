@@ -1,0 +1,412 @@
+# BioDynamICS: Physiological Signal Processing Demo
+
+This notebook demonstrates the use of the BioDynamICS physiological signal processing module to analyze clinical time series data from the MIMIC-III dataset.
+
+## 1. Setup and Imports
+
+```python
+import os
+import sys
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Add the parent directory to path so we can import our modules
+module_path = os.path.abspath(os.path.join('..'))
+if module_path not in sys.path:
+    sys.path.append(module_path)
+
+# Import our custom modules
+from src.data_integration import MimicPatientIntegrator
+from src.signal_processing import PhysiologicalSignalProcessor
+from src.visualization import ClinicalVisualizer
+
+# Configure visualization settings
+plt.style.use('seaborn-v0_8-whitegrid')
+sns.set(style="whitegrid")
+plt.rcParams['figure.figsize'] = [12, 6]
+plt.rcParams['font.size'] = 12
+```
+
+## 2. Load Patient Data
+
+```python
+# Initialize data integrator with path to MIMIC data
+data_path = os.path.join('data', 'mimic-iii-clinical-database-demo-1.4')
+mimic = MimicPatientIntegrator(data_path)
+
+# Load core tables
+patient_stays = mimic.load_core_tables()
+
+# Load additional data tables
+print("Loading CHARTEVENTS in chunks...")
+chartevents = mimic.load_chartevents_chunked(chunk_size=10000)
+
+# Load other clinical tables
+tables_to_load = [
+    "LABEVENTS", "PRESCRIPTIONS", "MICROBIOLOGYEVENTS", 
+    "OUTPUTEVENTS", "INPUTEVENTS_CV", "INPUTEVENTS_MV", 
+    "PROCEDURES_ICD", "DIAGNOSES_ICD"
+]
+
+for table in tables_to_load:
+    print(f"Loading {table}...")
+    mimic.load_table(table)
+```
+
+## 3. Create Patient Timeline
+
+```python
+# Get a sample patient ID
+# (This could be any patient with sufficient data)
+sample_patient_id = mimic.tables['PATIENTS']['subject_id'].iloc[0]
+
+# Create timeline for the patient
+print(f"Creating timeline for patient {sample_patient_id}...")
+patient_timeline = mimic.create_patient_timeline(sample_patient_id)
+
+# Display basic patient info
+print("\nPatient Information:")
+for key, value in patient_timeline['info'].items():
+    print(f"{key}: {value}")
+
+# Show a sample of the timeline
+print("\nTimeline sample:")
+timeline_df = patient_timeline['timeline']
+print(f"Total events: {len(timeline_df)}")
+print(f"Event types: {timeline_df['event_type'].value_counts().to_dict()}")
+timeline_df.head()
+```
+
+## 4. Initialize the Signal Processor
+
+```python
+# Create the physiological signal processor
+signal_processor = PhysiologicalSignalProcessor()
+
+# Initialize the clinical visualizer
+visualizer = ClinicalVisualizer()
+```
+
+## 5. Extract Time Domain Features from a Vital Sign
+
+```python
+# Let's work with heart rate as an example
+# First, filter the timeline for chart events that represent heart rate
+if 'itemid' in timeline_df.columns:
+    # Get heart rate measurements using itemid mapping
+    heart_rate_itemids = [211, 220045]  # MIMIC heart rate item IDs
+    heart_rate_data = timeline_df[timeline_df['itemid'].isin(heart_rate_itemids)].copy()
+    
+    # Convert to time series
+    heart_rate_data['measurement_time'] = pd.to_datetime(heart_rate_data['charttime'])
+    heart_rate_series = pd.Series(
+        heart_rate_data['valuenum'].values,
+        index=heart_rate_data['measurement_time']
+    ).sort_index()
+elif 'heart_rate' in timeline_df.columns:
+    # If we already have a heart_rate column
+    heart_rate_data = timeline_df[['measurement_time', 'heart_rate']].dropna(subset=['heart_rate'])
+    heart_rate_series = pd.Series(
+        heart_rate_data['heart_rate'].values,
+        index=pd.to_datetime(heart_rate_data['measurement_time'])
+    ).sort_index()
+else:
+    print("Heart rate data not available for this patient")
+    heart_rate_series = None
+
+# If we have heart rate data, extract time domain features
+if heart_rate_series is not None and len(heart_rate_series) > 10:
+    # Calculate stability metrics
+    stability_metrics = signal_processor.calculate_stability_metrics(
+        heart_rate_series, 'heart_rate'
+    )
+    
+    # Display stability metrics
+    print("\nStability Metrics for Heart Rate:")
+    for key, value in stability_metrics.items():
+        print(f"{key}: {value}")
+    
+    # If we have enough data points, calculate sample entropy
+    if len(heart_rate_series) >= 100:
+        sample_entropy = signal_processor.calculate_sample_entropy(heart_rate_series.values)
+        print(f"\nSample Entropy: {sample_entropy}")
+        print("(Lower values indicate more regularity, higher values indicate more complexity/randomness)")
+```
+
+## 8. Process All Patient Vital Signs
+
+```python
+# Process all vital signs for this patient
+print("\nProcessing all vital signs for this patient...")
+patient_features = signal_processor.process_vital_signs(timeline_df)
+
+# Display the number of features extracted
+print(f"Extracted {len(patient_features)} features from patient vital signs")
+
+# Display a sample of the features
+feature_sample = {k: patient_features[k] for k in list(patient_features.keys())[:10]}
+print("\nSample of extracted features:")
+for key, value in feature_sample.items():
+    print(f"{key}: {value}")
+```
+
+## 9. Calculate Organ System Status
+
+```python
+# Calculate organ system status based on the extracted features
+organ_status = signal_processor.calculate_organ_system_status(patient_features)
+
+# Display organ system status
+print("\nOrgan System Status:")
+for system, status in organ_status.items():
+    print(f"\n{system.title()} System:")
+    for metric, value in status.items():
+        print(f"  {metric}: {value}")
+```
+
+## 10. Calculate Allostatic Load
+
+```python
+# Calculate overall allostatic load
+allostatic_load = signal_processor.calculate_allostatic_load(organ_status)
+
+print(f"\nAllostatic Load: {allostatic_load}")
+print("(Higher values indicate greater physiological stress)")
+```
+
+## 11. Process Complete Patient Timeline
+
+```python
+# Process the complete patient timeline
+print("\nProcessing complete patient timeline...")
+timeline_results = signal_processor.process_patient_timeline(patient_timeline)
+
+# Display the results
+print(f"Patient ID: {timeline_results['patient_id']}")
+print(f"Number of features: {len(timeline_results['features'])}")
+print(f"Number of organ systems evaluated: {len(timeline_results['organ_status'])}")
+print(f"Allostatic load: {timeline_results['allostatic_load']}")
+```
+
+## 12. Analyze Physiological Stability Over Time
+
+```python
+# Analyze stability over time using sliding windows
+print("\nAnalyzing physiological stability over time...")
+stability_over_time = signal_processor.analyze_physiological_stability(
+    patient_timeline, window_hours=24, step_hours=8
+)
+
+# Display the results
+if not stability_over_time.empty:
+    print(f"Created {len(stability_over_time)} time windows for analysis")
+    print("\nStability metrics over time:")
+    print(stability_over_time[['window_start', 'window_end', 'data_points', 'allostatic_load']].head())
+else:
+    print("Not enough data for time window analysis")
+```
+
+## 13. Create Comprehensive Stability Report
+
+```python
+# Create a comprehensive stability report
+print("\nCreating comprehensive stability report...")
+stability_report = signal_processor.create_stability_report(patient_timeline)
+
+# Display report components
+print("\nStability Report Components:")
+for key, value in stability_report.items():
+    if key != 'stability_over_time' and key != 'overall_results':
+        print(f"{key}: {type(value)}")
+    else:
+        print(f"{key}: {type(value)} with {len(value)} items")
+
+# Display critical values if any
+if stability_report['critical_values']:
+    print("\nCritical Values:")
+    for cv in stability_report['critical_values']:
+        print(f"  {cv['measurement']}: {cv['value']} (Reference: {cv['reference_range']})")
+```
+
+## 14. Visualize Vital Sign Timeline
+
+```python
+# Visualize heart rate timeline
+if heart_rate_series is not None and len(heart_rate_series) > 0:
+    print("\nCreating heart rate timeline visualization...")
+    heart_rate_data = pd.DataFrame({'heart_rate': heart_rate_series, 'measurement_time': heart_rate_series.index})
+    hr_fig = visualizer.plot_vital_sign_timeline(heart_rate_data, 'heart_rate')
+    plt.show()
+```
+
+## 15. Create Multi-Vital Timeline
+
+```python
+# Visualize multiple vital signs
+vital_signs_to_plot = []
+
+# Check which vital signs are available
+possible_vitals = ['heart_rate', 'respiratory_rate', 'sbp', 'dbp', 'temperature', 'o2_saturation']
+for vital in possible_vitals:
+    if vital in timeline_df.columns and timeline_df[vital].notna().sum() > 5:
+        vital_signs_to_plot.append(vital)
+
+if vital_signs_to_plot:
+    print(f"\nCreating multi-vital timeline for: {', '.join(vital_signs_to_plot)}")
+    multi_vital_fig = visualizer.plot_multi_vital_timeline(timeline_df, vital_signs_to_plot)
+    plt.show()
+else:
+    print("\nNot enough vital sign data for multi-vital timeline")
+```
+
+## 16. Create Organ System Radar Plot
+
+```python
+# Create organ system radar plot
+print("\nCreating organ system radar plot...")
+radar_fig = visualizer.plot_organ_system_radar(stability_report)
+plt.show()
+```
+
+## 17. Plot Allostatic Load Trend
+
+```python
+# Plot allostatic load trend if we have time windows
+if 'stability_over_time' in stability_report and not stability_report['stability_over_time'].empty:
+    print("\nCreating allostatic load trend plot...")
+    trend_fig = visualizer.plot_allostatic_load_trend(stability_report['stability_over_time'])
+    plt.show()
+else:
+    print("\nNot enough data for allostatic load trend plot")
+```
+
+## 18. Create Phase Portrait
+
+```python
+# Check if we have heart rate and blood pressure for phase portrait
+if all(v in timeline_df.columns for v in ['heart_rate', 'sbp']):
+    # Filter for rows with both values
+    phase_data = timeline_df[['measurement_time', 'heart_rate', 'sbp']].dropna()
+    
+    if len(phase_data) >= 5:
+        print("\nCreating phase portrait of heart rate vs. blood pressure...")
+        phase_fig = visualizer.plot_phase_portrait(phase_data, 'heart_rate', 'sbp')
+        plt.show()
+        
+        # If we also have respiratory rate, create a 3D phase portrait
+        if 'respiratory_rate' in timeline_df.columns:
+            phase_data_3d = timeline_df[['measurement_time', 'heart_rate', 'sbp', 'respiratory_rate']].dropna()
+            
+            if len(phase_data_3d) >= 5:
+                print("\nCreating 3D phase portrait with respiratory rate...")
+                phase_3d_fig = visualizer.plot_phase_portrait(
+                    phase_data_3d, 'heart_rate', 'sbp', 'respiratory_rate'
+                )
+                plt.show()
+    else:
+        print("\nNot enough data for phase portrait")
+else:
+    print("\nMissing vital signs for phase portrait")
+```
+
+## 19. Create Organ System Heatmap
+
+```python
+# Create organ system heatmap if we have time windows
+if 'stability_over_time' in stability_report and not stability_report['stability_over_time'].empty:
+    print("\nCreating organ system heatmap...")
+    heatmap_fig = visualizer.plot_organ_system_heatmap(stability_report['stability_over_time'])
+    plt.show()
+else:
+    print("\nNot enough data for organ system heatmap")
+```
+
+## 20. Create Comprehensive Patient Dashboard
+
+```python
+# Create comprehensive patient dashboard
+print("\nCreating comprehensive patient dashboard...")
+dashboard_fig = visualizer.create_patient_dashboard(patient_timeline, stability_report)
+plt.show()
+```
+
+## 21. Summary
+
+```python
+print("\n=== BioDynamICS Analysis Summary ===")
+print(f"Patient ID: {patient_timeline['info']['subject_id']}")
+print(f"Total events analyzed: {len(patient_timeline['timeline'])}")
+print(f"Features extracted: {len(timeline_results['features'])}")
+print(f"Organ systems evaluated: {len(timeline_results['organ_status'])}")
+print(f"Allostatic load: {timeline_results['allostatic_load']:.2f}")
+
+if stability_report['critical_values']:
+    print(f"Critical values detected: {len(stability_report['critical_values'])}")
+else:
+    print("No critical values detected")
+
+if 'stability_trends' in stability_report and stability_report['stability_trends']:
+    trend = stability_report['stability_trends'].get('allostatic_load_trend', 0)
+    if trend > 0.05:
+        print("Stability trend: DETERIORATING")
+    elif trend < -0.05:
+        print("Stability trend: IMPROVING")
+    else:
+        print("Stability trend: STABLE")
+    
+print("\nBioDynamICS analysis complete!")
+``` and len(heart_rate_series) > 0:
+    # Visualize the heart rate time series
+    plt.figure(figsize=(12, 5))
+    plt.plot(heart_rate_series.index, heart_rate_series.values, 'o-', markersize=4)
+    plt.title('Heart Rate Time Series')
+    plt.xlabel('Time')
+    plt.ylabel('Heart Rate (bpm)')
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.show()
+    
+    # Extract time domain features
+    time_features = signal_processor.extract_time_domain_features(heart_rate_series, 'heart_rate')
+    
+    # Display the features
+    print("\nTime Domain Features for Heart Rate:")
+    for key, value in time_features.items():
+        print(f"{key}: {value}")
+else:
+    print("No heart rate data available for feature extraction")
+```
+
+## 6. Extract Frequency Domain and Wavelet Features
+
+```python
+# Continue with heart rate analysis if data is available
+if heart_rate_series is not None and len(heart_rate_series) > 10:
+    # Extract frequency domain features
+    freq_features = signal_processor.extract_frequency_domain_features(
+        heart_rate_series, 'heart_rate'
+    )
+    
+    # Extract wavelet features
+    wavelet_features = signal_processor.extract_wavelet_features(
+        heart_rate_series, 'heart_rate'
+    )
+    
+    # Display frequency domain features
+    print("\nFrequency Domain Features for Heart Rate:")
+    for key, value in freq_features.items():
+        print(f"{key}: {value}")
+    
+    # Display wavelet features
+    print("\nWavelet Features for Heart Rate:")
+    for key, value in wavelet_features.items():
+        print(f"{key}: {value}")
+```
+
+## 7. Calculate Stability Metrics
+
+```python
+# Calculate stability metrics if we have enough data
+if heart_rate_series is not None
